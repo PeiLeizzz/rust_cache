@@ -2,19 +2,20 @@ use crate::lru::err::ArenaOOM;
 
 // 内存单位的索引信息
 // 用于在内存区域中查询数据
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Index {
     // 该内存单位在整个内存区域的下标
     // 这里的下标对应 Vec 中的下标
-    pub idx: usize,
+    idx: usize,
 
     // 这个代数是在插入时返回的
     // 可能在查询时数据已被覆盖
-    pub generation: u64,
+    generation: u64,
 }
 
 // 最小的一块内存单位，存放对应的值（V）
 // 有两种状态：空闲 / 被占用
+#[derive(Debug, PartialEq)]
 pub enum Entry<T> {
     Free {
         // 下一块空闲区域的下标
@@ -98,6 +99,7 @@ impl<T> Arena<T> {
         // 将之前的首个空闲区域指向新区域的头
         // 因为扩容后推测应该是要 insert
         // 所以可以提前指向更大的连续空闲区域
+        // self.free_list_head == self.cap
         self.free_list_head = Some(start);
         // 更新内存容量
         self.cap += cap;
@@ -190,5 +192,154 @@ impl<T> Arena<T> {
         }
 
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn arena_with_capacity() {
+        let capacity = 100;
+        let arena = Arena::<i32>::new_with_cap(capacity);
+        assert_eq!(arena.cap(), capacity);
+
+        assert_eq!(arena.free_list_head, Some(0));
+        let mut i = 0;
+        for entry in &arena.items {
+            // free_list_head = 0（0 -> 1 -> 2 -> ... -> 99）
+            // 最后一块内存的 next_free 为 None
+            if i == capacity - 1 {
+                assert_eq!(entry, &Entry::Free { next_free: None })
+            } else {
+                assert_eq!(
+                    entry,
+                    &Entry::Free {
+                        next_free: Some(i + 1)
+                    }
+                )
+            }
+
+            i += 1;
+        }
+    }
+
+    #[test]
+    fn arena_insert() {
+        let mut arena = Arena::<i32>::new();
+        assert_eq!(arena.insert(0), Err(ArenaOOM {}));
+
+        arena.reserve(1);
+        let index_0 = arena.insert(0);
+        assert_eq!(
+            index_0,
+            Ok(Index {
+                idx: 0,
+                generation: 0
+            })
+        );
+
+        arena.reserve(1);
+        let index_1 = arena.insert(1);
+        assert_eq!(
+            index_1,
+            Ok(Index {
+                idx: 1,
+                generation: 1
+            })
+        );
+
+        let index_0_val = index_0.unwrap();
+        let item_0 = arena.get(&index_0_val);
+        assert_eq!(item_0, Some(&0));
+
+        let index_1_val = index_1.unwrap();
+        let item_1 = arena.get(&index_1_val);
+        assert_eq!(item_1, Some(&1));
+
+        let item_0 = arena.get_mut(&index_0_val);
+        assert_eq!(item_0, Some(&mut 0));
+        let item_0 = item_0.unwrap();
+        *item_0 = 25;
+
+        let item_0 = arena.get(&index_0_val);
+        assert_eq!(item_0, Some(&25));
+
+        let item_1 = arena.get_mut(&index_1_val);
+        assert_eq!(item_1, Some(&mut 1));
+        let item_1 = item_1.unwrap();
+        *item_1 = -78;
+
+        let item_1 = arena.get(&index_1_val);
+        assert_eq!(item_1, Some(&-78));
+
+        assert_eq!(arena.cap(), 2);
+        assert_eq!(arena.insert(0), Err(ArenaOOM {}));
+
+        let old_cap = arena.cap();
+        let to_reserve = 100;
+        arena.reserve(to_reserve);
+        // free_list_head = old_cap
+        for ele in 0..to_reserve {
+            assert_eq!(
+                arena.insert(0),
+                Ok(Index {
+                    idx: old_cap + ele,
+                    generation: (old_cap + ele) as u64
+                })
+            )
+        }
+        assert_eq!(arena.cap(), old_cap + to_reserve);
+        assert_eq!(arena.insert(0), Err(ArenaOOM {}));
+    }
+
+    #[test]
+    fn arena_remove() {
+        let mut arena = Arena::<i32>::new_with_cap(1);
+
+        let index = arena.insert(0).unwrap();
+        assert_eq!(arena.get(&index), Some(&0));
+
+        assert_eq!(arena.remove(&index).unwrap(), 0);
+
+        assert_eq!(arena.get(&index), None);
+
+        let index = arena.insert(56).unwrap();
+        assert_eq!(
+            index,
+            Index {
+                idx: 0,
+                generation: 1
+            }
+        );
+
+        assert_eq!(arena.remove(&index).unwrap(), 56);
+        assert!(arena.remove(&index).is_none());
+
+        let current_gen = 2;
+
+        let to_reserve = 5;
+        arena.reserve(to_reserve);
+        // 新 free_list_head = 1（1 -> 2 -> 3 -> 4 -> 5 -> 0）
+        for ele in 0..to_reserve + 1 {
+            if ele == to_reserve {
+                assert_eq!(
+                    arena.insert(0),
+                    Ok(Index {
+                        idx: 0,
+                        generation: (current_gen + ele) as u64
+                    })
+                )
+            } else {
+                assert_eq!(
+                    arena.insert(0),
+                    Ok(Index {
+                        idx: ele + 1,
+                        generation: (current_gen + ele) as u64
+                    })
+                )
+            }
+        }
     }
 }
