@@ -1,4 +1,5 @@
 mod arena;
-pub mod err;
 mod list;
+
+pub mod err;
 pub mod lru;
