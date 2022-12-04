@@ -43,7 +43,7 @@
    >
    > `Map` 的并发安全可以基于 [DashMap](https://docs.rs/dashmap/3.11.10/dashmap/struct.DashMap.html)
 4. [ @陈鹏郅]优化实现 LRU-K / 2Q
-   > LRU-K 是通过 `K` 个相同的缓存进行的（可能比较麻烦）
+   > LRU-K 是通过 `2` 个 `LRUCache` 实现的（可能比较麻烦）
    > 
    > 2Q 是通过 `LRUCache + FIFO` 实现的（较容易）
    >
