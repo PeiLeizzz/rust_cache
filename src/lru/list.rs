@@ -170,3 +170,105 @@ impl<T> LinkedList<T> {
         self.arena.get_mut(index).ok_or(ListError::LinkBroken)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::thread;
+
+    use super::*;
+
+    impl<T> LinkedList<T> {
+        fn iter(&self) -> Iter<T> {
+            Iter {
+                list: self,
+                current: self.head,
+            }
+        }
+    }
+
+    struct Iter<'a, T: 'a> {
+        list: &'a LinkedList<T>,
+        current: Option<Index>,
+    }
+    impl<'a, T: 'a> Iterator for Iter<'a, T> {
+        type Item = &'a T;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            if let Some(index) = self.current {
+                if let Ok(node) = self.list.get(&index) {
+                    self.current = node.next;
+                    return Some(&node.value);
+                }
+            }
+
+            None
+        }
+    }
+
+    #[test]
+    fn list_new() {
+        let list = LinkedList::<i32>::new();
+        assert!(list.is_empty());
+        assert!(list.is_full());
+    }
+
+    #[test]
+    fn list_push_front() {
+        let capacity = 10;
+        let mut list = LinkedList::<i32>::new_with_cap(capacity);
+        for ele in 0..capacity {
+            assert!(list.push_front(ele as i32).is_ok());
+        }
+
+        let mut i = capacity as i32 - 1;
+        for ele in list.iter() {
+            assert_eq!(ele, &i);
+            i -= 1;
+        }
+    }
+
+    #[test]
+    fn list_pop_back() {
+        let capacity = 10;
+        let mut list = LinkedList::<i32>::new_with_cap(capacity);
+
+        assert_eq!(list.pop_back(), Err(ListError::ListEmpty));
+
+        for ele in 0..capacity {
+            assert!(list.push_front(ele as i32).is_ok());
+        }
+
+        for ele in 0..capacity {
+            assert_eq!(list.pop_back().unwrap(), ele as i32);
+        }
+
+        assert!(list.is_empty());
+        assert_eq!(list.pop_back(), Err(ListError::ListEmpty));
+    }
+
+    #[test]
+    fn list_remove() {
+        let mut list = LinkedList::<i32>::new_with_cap(5);
+        assert!(list.is_empty());
+
+        let link_0 = list.push_front(0).unwrap();
+        let _link_1 = list.push_front(1).unwrap();
+        let link_2 = list.push_front(2).unwrap();
+        let _link_3 = list.push_front(3).unwrap();
+        let link_4 = list.push_front(4).unwrap();
+        assert!(list.is_full());
+        assert!(list.iter().eq([4, 3, 2, 1, 0].iter()));
+
+        assert!(list.remove(&link_0).is_ok());
+        assert_eq!(list.len(), 4);
+        assert!(list.iter().eq([4, 3, 2, 1].iter()));
+
+        assert!(list.remove(&link_4).is_ok());
+        assert_eq!(list.len(), 3);
+        assert!(list.iter().eq([3, 2, 1].iter()));
+
+        assert!(list.remove(&link_2).is_ok());
+        assert_eq!(list.len(), 2);
+        assert!(list.iter().eq([3, 1].iter()));
+    }
+}
