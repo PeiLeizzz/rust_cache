@@ -150,6 +150,27 @@ impl<T> LinkedList<T> {
         Ok(node.value)
     }
 
+    pub fn retire(&mut self) -> Result<Option<Vec<T>>, ListError> {
+        if let Some(_) = self.timeout {
+            let now = time::Instant::now();
+            let mut values = vec![];
+            while !self.is_empty() {
+                let tail_index = self.tail.unwrap();
+                let expire_time = self.get(&tail_index)?.expire_time.unwrap();
+                if now >= expire_time {
+                    values.push(self.remove(&tail_index)?);
+                } else {
+                    break;
+                }
+            }
+            if values.len() > 0 {
+                return Ok(Some(values));
+            }
+            // 如果没有一个被淘汰，返回 None，而不是 vec![]
+        }
+        Ok(None)
+    }
+
     pub fn len(&self) -> usize {
         self.len
     }
@@ -270,5 +291,38 @@ mod tests {
         assert!(list.remove(&link_2).is_ok());
         assert_eq!(list.len(), 2);
         assert!(list.iter().eq([3, 1].iter()));
+    }
+
+    #[test]
+    fn list_retire() {
+        let capacity = 10;
+        let mut list =
+            LinkedList::<i32>::new_with_cap_timeout(capacity, time::Duration::from_millis(1000));
+        for ele in 0..5 {
+            assert!(list.push_front(ele as i32).is_ok());
+        }
+
+        thread::sleep(time::Duration::from_millis(500));
+        assert_eq!(list.len(), 5);
+
+        for ele in 0..5 {
+            assert!(list.push_front(5 + ele as i32).is_ok());
+        }
+        assert_eq!(list.len(), 10);
+
+        assert!(list.retire().is_ok());
+        assert!(list.retire().unwrap().is_none());
+        assert_eq!(list.len(), 10);
+
+        thread::sleep(time::Duration::from_millis(500));
+        assert_eq!(list.retire().unwrap().unwrap(), vec![0, 1, 2, 3, 4]);
+        assert_eq!(list.len(), 5);
+        assert_eq!(list.pop_back().unwrap(), 5);
+
+        thread::sleep(time::Duration::from_millis(500));
+        assert_eq!(list.retire().unwrap().unwrap(), vec![6, 7, 8, 9]);
+        assert_eq!(list.len(), 0);
+
+        assert!(list.retire().unwrap().is_none());
     }
 }
