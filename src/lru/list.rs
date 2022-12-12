@@ -35,6 +35,7 @@ impl<T> LinkedList<T> {
         }
     }
 
+    // 从内存中创建一定容量的链表，并带有超时淘汰机制
     pub fn new_with_cap_timeout(cap: usize, timeout: time::Duration) -> Self {
         let mut list = LinkedList::new();
         list.reserve(cap);
@@ -42,12 +43,14 @@ impl<T> LinkedList<T> {
         list
     }
 
+    // 从内存中创建一定容量的链表，并不带有超时淘汰机制
     pub fn new_with_cap(cap: usize) -> Self {
         let mut list = LinkedList::new();
         list.reserve(cap);
         list
     }
-
+    
+    // 从内存中获取cap容量的内存
     pub fn reserve(&mut self, cap: usize) {
         self.arena.reserve(cap)
     }
@@ -87,6 +90,39 @@ impl<T> LinkedList<T> {
         Ok(cur_head_index)
     }
 
+    // 从尾部插入节点
+    pub fn push_back(&mut self, value: T) -> Result<Index, ListError> {
+        let node = Node {
+            value,
+            prev: self.tail,
+            next: None,
+            expire_time: None,
+        };
+
+        let index = self.arena.insert(node).map_err(ListError::ListOOM)?;
+        let link = index;
+        if let Some(tail) = self.tail {
+            let tail_node = self.get_mut(&tail)?;
+            tail_node.next = Some(link);
+        } else {
+            self.head = Some(link)
+        }
+
+        self.tail = Some(link);
+
+        self.len += 1;
+        Ok(link)
+    }
+
+    // 头部删除节点
+    pub fn pop_front(&mut self) -> Result<T, ListError> {
+        if let Some(head_index) = self.head {
+            self.remove(&head_index)
+        } else {
+            Err(ListError::ListEmpty)
+        }
+    }
+
     // 尾部删除节点
     pub fn pop_back(&mut self) -> Result<T, ListError> {
         if let Some(tail_index) = self.tail {
@@ -94,24 +130,61 @@ impl<T> LinkedList<T> {
         } else {
             Err(ListError::ListEmpty)
         }
+    }
 
-        // let old_tail_index = self.tail.ok_or(ListError::ListEmpty)?;
-        // let old_tail_node = self.arena.remove(&old_tail_index).ok_or(ListError::LinkBroken)?;
+    // 将index节点移动到尾部
+    pub fn reposition_to_tail(&mut self, index: &Index) -> Result<(), ListError> {
+        let head = self.head.ok_or(ListError::ListEmpty)?;
+        let tail = self.tail.ok_or(ListError::ListEmpty)?;
 
-        // // 尾转移到原尾的前一个节点
-        // self.tail = old_tail_node.prev;
-        // if let Some(cur_tail_index) = self.tail {
-        //     // 将新尾的 next 置为空
-        //     let cur_tail_node = self.get_mut(&cur_tail_index)?;
-        //     cur_tail_node.next = None;
-        // } else {
-        //     // 如果尾节点为空，说明此时是空链表
-        //     // 头节点也需要指派为空
-        //     self.head = None;
-        // }
+        // 链表长度为1，当前即为尾节点
+        if index == &tail {
+            return Ok(());
+        }
 
-        // self.len -= 1;
-        // Ok(old_tail_node.value)
+        // 链表长度大于等于2，有必要移动节点位置
+        let head_node = self.get_mut(&head)?;
+        if index== &head {
+            self.head = head_node.next;
+        }
+
+        let node = self.get_mut(index)?;
+
+        // 开始移动节点
+        let prev_index = node.prev;
+        let next_index = node.next;
+
+        node.prev = Some(tail);
+        node.next = None;
+
+        // 将之前尾节点指向当前节点
+        if let Some(index) = prev_index {
+            let prev = self.get_mut(&index)?;
+            prev.next = next_index;
+        }
+
+        if let Some(index) = next_index {
+            let next = self.get_mut(&index)?;
+            next.prev = prev_index;
+        }
+
+        let tail_node = self.get_mut(&tail)?;
+        tail_node.next = Some(*index);
+        self.tail = Some(*index);
+
+        Ok(())
+    }
+
+    // 返回头节点的值
+    pub fn peek_front(&self) -> Result<&T, ListError> {
+        let head_index = self.head.ok_or(ListError::ListEmpty)?;
+        return self.get(&head_index).map(|x| &x.value);
+    }
+
+    // 返回尾节点的值
+    pub fn peek_back(&self) -> Result<&T, ListError> {
+        let tail_index = self.tail.ok_or(ListError::ListEmpty)?;
+        return self.get(&tail_index).map(|x| &x.value);
     }
 
     // 根据节点索引删除该节点
@@ -249,6 +322,74 @@ mod tests {
     }
 
     #[test]
+    fn list_reposition_to_tail() {
+        let capacity = 5;
+
+        let mut list = LinkedList::<i32>::new_with_cap(capacity);
+        assert!(list.is_empty());
+
+        for ele in 0..capacity {
+            list.push_back(ele as i32).unwrap();
+        }
+
+        for _ in 0..(capacity / 2) {
+            list.reposition_to_tail(&list.head.unwrap()).unwrap();
+        }
+
+        let mut i = 0;
+        let mut lh = 0 as i32;
+        let mut rh = capacity as i32 / 2;
+        for ele in list.iter() {
+            if i <= (capacity / 2) {
+                assert_eq!(ele, &rh);
+                rh += 1;
+            } else {
+                assert_eq!(ele, &lh);
+                lh += 1;
+            }
+            i += 1
+        }
+
+        let mut list = LinkedList::<i32>::new_with_cap(2);
+        let index_0 = list.push_back(0).unwrap();
+        list.reposition_to_tail(&index_0).unwrap();
+        assert_eq!(Some(index_0), list.head);
+        assert_eq!(Some(index_0), list.tail);
+
+        let index_1 = list.push_back(1).unwrap();
+
+        list.reposition_to_tail(&index_0).unwrap();
+
+        assert_eq!(list.head, Some(index_1));
+        assert_eq!(list.tail, Some(index_0));
+
+        list.reserve(1);
+        list.push_back(2).unwrap();
+        list.reposition_to_tail(&index_0).unwrap();
+
+        assert!(list.iter().eq([1, 2, 0].iter()));
+    }
+
+    #[test]
+    fn list_pop_front() {
+        let capacity = 10;
+        let mut list = LinkedList::<i32>::new_with_cap(capacity);
+
+        assert_eq!(list.pop_front(), Err(ListError::ListEmpty));
+
+        for ele in 0..capacity {
+            assert!(list.push_back(ele as i32).is_ok());
+        }
+
+        for ele in 0..capacity {
+            assert_eq!(list.pop_front().unwrap(), ele as i32);
+        }
+
+        assert!(list.is_empty());
+        assert_eq!(list.pop_front(), Err(ListError::ListEmpty));
+    }
+
+    #[test]
     fn list_pop_back() {
         let capacity = 10;
         let mut list = LinkedList::<i32>::new_with_cap(capacity);
@@ -324,5 +465,5 @@ mod tests {
         assert_eq!(list.len(), 0);
 
         assert!(list.retire().unwrap().is_none());
-    }
+    } 
 }
