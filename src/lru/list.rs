@@ -341,10 +341,10 @@ mod tests {
         let mut lh = capacity as i32 / 2;
         for ele in list.iter() {
             if i <= (capacity / 2) {
-                assert_eq!(ele, &rh);
+                assert_eq!(ele, &lh);
                 lh += 1;
             } else {
-                assert_eq!(ele, &lh);
+                assert_eq!(ele, &rh);
                 rh += 1;
             }
             i += 1
