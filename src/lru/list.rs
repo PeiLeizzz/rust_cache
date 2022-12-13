@@ -132,20 +132,20 @@ impl<T> LinkedList<T> {
         }
     }
 
-    // 将index节点移动到尾部
-    pub fn reposition_to_tail(&mut self, index: &Index) -> Result<(), ListError> {
+    // 将index节点移动到头部
+    pub fn reposition_to_head(&mut self, index: &Index) -> Result<(), ListError> {
         let head = self.head.ok_or(ListError::ListEmpty)?;
         let tail = self.tail.ok_or(ListError::ListEmpty)?;
 
-        // 链表长度为1，当前即为尾节点
-        if index == &tail {
+        // 当前节点即为头节点
+        if index == &head {
             return Ok(());
         }
 
-        // 链表长度大于等于2，有必要移动节点位置
-        let head_node = self.get_mut(&head)?;
-        if index== &head {
-            self.head = head_node.next;
+        // 当前节点是尾节点，需要改变链表尾节点指针
+        let tail_node = self.get_mut(&tail)?;
+        if index== &tail {
+            self.tail = tail_node.prev;
         }
 
         let node = self.get_mut(index)?;
@@ -154,10 +154,10 @@ impl<T> LinkedList<T> {
         let prev_index = node.prev;
         let next_index = node.next;
 
-        node.prev = Some(tail);
-        node.next = None;
+        node.next = Some(head);
+        node.prev = None;
 
-        // 将之前尾节点指向当前节点
+        // 将移走的节点处接上
         if let Some(index) = prev_index {
             let prev = self.get_mut(&index)?;
             prev.next = next_index;
@@ -168,9 +168,9 @@ impl<T> LinkedList<T> {
             next.prev = prev_index;
         }
 
-        let tail_node = self.get_mut(&tail)?;
-        tail_node.next = Some(*index);
-        self.tail = Some(*index);
+        let head_node = self.get_mut(&head)?;
+        head_node.pre = Some(*index);
+        self.head = Some(*index);
 
         Ok(())
     }
@@ -322,7 +322,7 @@ mod tests {
     }
 
     #[test]
-    fn list_reposition_to_tail() {
+    fn list_reposition_to_head() {
         let capacity = 5;
 
         let mut list = LinkedList::<i32>::new_with_cap(capacity);
@@ -333,41 +333,41 @@ mod tests {
         }
 
         for _ in 0..(capacity / 2) {
-            list.reposition_to_tail(&list.head.unwrap()).unwrap();
+            list.reposition_to_head(&list.tail.unwrap()).unwrap();
         }
 
         let mut i = 0;
-        let mut lh = 0 as i32;
-        let mut rh = capacity as i32 / 2;
+        let mut rh = 0 as i32;
+        let mut lh = capacity as i32 / 2;
         for ele in list.iter() {
             if i <= (capacity / 2) {
                 assert_eq!(ele, &rh);
-                rh += 1;
+                lh += 1;
             } else {
                 assert_eq!(ele, &lh);
-                lh += 1;
+                rh += 1;
             }
             i += 1
         }
 
         let mut list = LinkedList::<i32>::new_with_cap(2);
         let index_0 = list.push_back(0).unwrap();
-        list.reposition_to_tail(&index_0).unwrap();
+        list.reposition_to_head(&index_0).unwrap();
         assert_eq!(Some(index_0), list.head);
         assert_eq!(Some(index_0), list.tail);
 
         let index_1 = list.push_back(1).unwrap();
 
-        list.reposition_to_tail(&index_0).unwrap();
+        list.reposition_to_head(&index_1).unwrap();
 
         assert_eq!(list.head, Some(index_1));
         assert_eq!(list.tail, Some(index_0));
 
         list.reserve(1);
         list.push_back(2).unwrap();
-        list.reposition_to_tail(&index_0).unwrap();
+        list.reposition_to_head(&index_1).unwrap();
 
-        assert!(list.iter().eq([1, 2, 0].iter()));
+        assert!(list.iter().eq([0, 1, 2].iter()));
     }
 
     #[test]
