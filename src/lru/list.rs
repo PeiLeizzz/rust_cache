@@ -134,44 +134,9 @@ impl<T> LinkedList<T> {
 
     // 将index节点移动到头部
     pub fn reposition_to_head(&mut self, index: &Index) -> Result<(), ListError> {
-        let head = self.head.ok_or(ListError::ListEmpty)?;
-        let tail = self.tail.ok_or(ListError::ListEmpty)?;
-
-        // 当前节点即为头节点
-        if index == &head {
-            return Ok(());
-        }
-
-        // 当前节点是尾节点，需要改变链表尾节点指针
-        let tail_node = self.get_mut(&tail)?;
-        if index== &tail {
-            self.tail = tail_node.prev;
-        }
-
-        let node = self.get_mut(index)?;
-
-        // 开始移动节点
-        let prev_index = node.prev;
-        let next_index = node.next;
-
-        node.next = Some(head);
-        node.prev = None;
-
-        // 将移走的节点处接上
-        if let Some(index) = prev_index {
-            let prev = self.get_mut(&index)?;
-            prev.next = next_index;
-        }
-
-        if let Some(index) = next_index {
-            let next = self.get_mut(&index)?;
-            next.prev = prev_index;
-        }
-
-        let head_node = self.get_mut(&head)?;
-        head_node.pre = Some(*index);
-        self.head = Some(*index);
-
+        let index_node = self.get_mut(&index)?;
+        self.push_front(index_node.value).is_ok();
+        self.remove(&index);
         Ok(())
     }
 
