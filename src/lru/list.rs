@@ -132,12 +132,11 @@ impl<T> LinkedList<T> {
         }
     }
 
-    // 将index节点移动到头部
-    pub fn reposition_to_head(&mut self, index: &Index) -> Result<(), ListError> {
-        let index_node = self.get_mut(&index)?;
-        self.push_front(index_node.value).is_ok();
-        self.remove(&index);
-        Ok(())
+    // 将 index 节点移动到头部
+    // 返回的是该节点的最新 index，原来的 index 会失效！
+    pub fn reposition_to_head(&mut self, index: &Index) -> Result<Index, ListError> {
+        let value = self.remove(&index)?;
+        self.push_front(value)
     }
 
     // 返回头节点的值
@@ -152,7 +151,7 @@ impl<T> LinkedList<T> {
         return self.get(&tail_index).map(|x| &x.value);
     }
 
-    // 根据节点索引删除该节点
+    // 根据节点索引删除该节点，返回该节点值的所有权
     pub fn remove(&mut self, index: &Index) -> Result<T, ListError> {
         if self.is_empty() {
             return Err(ListError::ListEmpty);
@@ -188,6 +187,7 @@ impl<T> LinkedList<T> {
         Ok(node.value)
     }
 
+    // 从链表尾开始淘汰过期节点，并返回其值的所有权的集合
     pub fn retire(&mut self) -> Result<Option<Vec<T>>, ListError> {
         if let Some(_) = self.timeout {
             let now = time::Instant::now();
@@ -296,10 +296,13 @@ mod tests {
         for ele in 0..capacity {
             list.push_back(ele as i32).unwrap();
         }
+        assert!(list.iter().eq([0, 1, 2, 3, 4].iter()));
 
-        for _ in 0..(capacity / 2) {
+        // [0, 1, 2, 3, 4] --> [2, 3, 4, 0, 1]
+        for _ in capacity/2..capacity {
             list.reposition_to_head(&list.tail.unwrap()).unwrap();
         }
+        assert!(list.iter().eq([2, 3, 4, 0, 1].iter()));
 
         let mut i = 0;
         let mut rh = 0 as i32;
@@ -316,21 +319,26 @@ mod tests {
         }
 
         let mut list = LinkedList::<i32>::new_with_cap(2);
+        // [0]
         let index_0 = list.push_back(0).unwrap();
-        list.reposition_to_head(&index_0).unwrap();
-        assert_eq!(Some(index_0), list.head);
-        assert_eq!(Some(index_0), list.tail);
+        let index_0_another = list.reposition_to_head(&index_0).unwrap();
+        assert_ne!(Some(index_0), Some(index_0_another));
+        assert_eq!(Some(index_0_another), list.head);
+        assert_eq!(Some(index_0_another), list.tail);
 
+        // [0, 1]
         let index_1 = list.push_back(1).unwrap();
+        // [1, 0]
+        let index_1_another = list.reposition_to_head(&index_1).unwrap();
 
-        list.reposition_to_head(&index_1).unwrap();
-
-        assert_eq!(list.head, Some(index_1));
-        assert_eq!(list.tail, Some(index_0));
+        assert_eq!(list.head, Some(index_1_another));
+        assert_eq!(list.tail, Some(index_0_another));
 
         list.reserve(1);
+        // [1, 0, 2]
         list.push_back(2).unwrap();
-        list.reposition_to_head(&index_1).unwrap();
+        // [0, 1, 2]
+        list.reposition_to_head(&index_0_another).unwrap();
 
         assert!(list.iter().eq([0, 1, 2].iter()));
     }
@@ -431,4 +439,40 @@ mod tests {
 
         assert!(list.retire().unwrap().is_none());
     } 
+
+
+    impl<T> Node<T> {
+        pub fn value(&self) -> &T {
+            &self.value
+        }
+    }
+    #[test]
+    fn list_retire_and_reposition_to_head() {
+        let capacity = 5;
+        let mut list =
+            LinkedList::<i32>::new_with_cap_timeout(capacity, time::Duration::from_millis(1000));
+
+        let mut live_index = list.head;
+        for ele in 0..capacity {
+            let index = list.push_front(ele as i32).unwrap();
+            // 记录中间节点
+            if ele == capacity / 2 {
+                live_index = Some(index);
+            }
+        }
+        assert_eq!(list.len(), capacity);
+
+        // 此时应该节点全都过期了
+        thread::sleep(time::Duration::from_millis(1000));
+
+        // 更新中心节点
+        let live_index = list.reposition_to_head(&live_index.unwrap()).unwrap();
+        assert_eq!(*list.get(&live_index).unwrap().value(), capacity as i32 / 2);
+        assert_eq!(list.head.unwrap(), live_index);
+
+        // 淘汰其余 capacity - 1 个节点
+        assert!(list.retire().is_ok());
+        assert_eq!(list.len(), 1);
+        assert!(list.iter().eq([capacity as i32 / 2].iter()));
+    }
 }
