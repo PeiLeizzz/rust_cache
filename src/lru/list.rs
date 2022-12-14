@@ -35,6 +35,7 @@ impl<T> LinkedList<T> {
         }
     }
 
+    // 从内存中创建一定容量的链表，并带有超时淘汰机制
     pub fn new_with_cap_timeout(cap: usize, timeout: time::Duration) -> Self {
         let mut list = LinkedList::new();
         list.reserve(cap);
@@ -42,12 +43,14 @@ impl<T> LinkedList<T> {
         list
     }
 
+    // 从内存中创建一定容量的链表，并不带有超时淘汰机制
     pub fn new_with_cap(cap: usize) -> Self {
         let mut list = LinkedList::new();
         list.reserve(cap);
         list
     }
-
+    
+    // 从内存中获取cap容量的内存
     pub fn reserve(&mut self, cap: usize) {
         self.arena.reserve(cap)
     }
@@ -87,6 +90,39 @@ impl<T> LinkedList<T> {
         Ok(cur_head_index)
     }
 
+    // 从尾部插入节点
+    pub fn push_back(&mut self, value: T) -> Result<Index, ListError> {
+        let node = Node {
+            value,
+            prev: self.tail,
+            next: None,
+            expire_time: None,
+        };
+
+        let index = self.arena.insert(node).map_err(ListError::ListOOM)?;
+        let link = index;
+        if let Some(tail) = self.tail {
+            let tail_node = self.get_mut(&tail)?;
+            tail_node.next = Some(link);
+        } else {
+            self.head = Some(link)
+        }
+
+        self.tail = Some(link);
+
+        self.len += 1;
+        Ok(link)
+    }
+
+    // 头部删除节点
+    pub fn pop_front(&mut self) -> Result<T, ListError> {
+        if let Some(head_index) = self.head {
+            self.remove(&head_index)
+        } else {
+            Err(ListError::ListEmpty)
+        }
+    }
+
     // 尾部删除节点
     pub fn pop_back(&mut self) -> Result<T, ListError> {
         if let Some(tail_index) = self.tail {
@@ -94,27 +130,28 @@ impl<T> LinkedList<T> {
         } else {
             Err(ListError::ListEmpty)
         }
-
-        // let old_tail_index = self.tail.ok_or(ListError::ListEmpty)?;
-        // let old_tail_node = self.arena.remove(&old_tail_index).ok_or(ListError::LinkBroken)?;
-
-        // // 尾转移到原尾的前一个节点
-        // self.tail = old_tail_node.prev;
-        // if let Some(cur_tail_index) = self.tail {
-        //     // 将新尾的 next 置为空
-        //     let cur_tail_node = self.get_mut(&cur_tail_index)?;
-        //     cur_tail_node.next = None;
-        // } else {
-        //     // 如果尾节点为空，说明此时是空链表
-        //     // 头节点也需要指派为空
-        //     self.head = None;
-        // }
-
-        // self.len -= 1;
-        // Ok(old_tail_node.value)
     }
 
-    // 根据节点索引删除该节点
+    // 将 index 节点移动到头部
+    // 返回的是该节点的最新 index，原来的 index 会失效！
+    pub fn reposition_to_head(&mut self, index: &Index) -> Result<Index, ListError> {
+        let value = self.remove(&index)?;
+        self.push_front(value)
+    }
+
+    // 返回头节点的值
+    pub fn peek_front(&self) -> Result<&T, ListError> {
+        let head_index = self.head.ok_or(ListError::ListEmpty)?;
+        return self.get(&head_index).map(|x| &x.value);
+    }
+
+    // 返回尾节点的值
+    pub fn peek_back(&self) -> Result<&T, ListError> {
+        let tail_index = self.tail.ok_or(ListError::ListEmpty)?;
+        return self.get(&tail_index).map(|x| &x.value);
+    }
+
+    // 根据节点索引删除该节点，返回该节点值的所有权
     pub fn remove(&mut self, index: &Index) -> Result<T, ListError> {
         if self.is_empty() {
             return Err(ListError::ListEmpty);
@@ -150,6 +187,7 @@ impl<T> LinkedList<T> {
         Ok(node.value)
     }
 
+    // 从链表尾开始淘汰过期节点，并返回其值的所有权的集合
     pub fn retire(&mut self) -> Result<Option<Vec<T>>, ListError> {
         if let Some(_) = self.timeout {
             let now = time::Instant::now();
@@ -249,6 +287,82 @@ mod tests {
     }
 
     #[test]
+    fn list_reposition_to_head() {
+        let capacity = 5;
+
+        let mut list = LinkedList::<i32>::new_with_cap(capacity);
+        assert!(list.is_empty());
+
+        for ele in 0..capacity {
+            list.push_back(ele as i32).unwrap();
+        }
+        assert!(list.iter().eq([0, 1, 2, 3, 4].iter()));
+
+        // [0, 1, 2, 3, 4] --> [2, 3, 4, 0, 1]
+        for _ in capacity/2..capacity {
+            list.reposition_to_head(&list.tail.unwrap()).unwrap();
+        }
+        assert!(list.iter().eq([2, 3, 4, 0, 1].iter()));
+
+        let mut i = 0;
+        let mut rh = 0 as i32;
+        let mut lh = capacity as i32 / 2;
+        for ele in list.iter() {
+            if i <= (capacity / 2) {
+                assert_eq!(ele, &lh);
+                lh += 1;
+            } else {
+                assert_eq!(ele, &rh);
+                rh += 1;
+            }
+            i += 1
+        }
+
+        let mut list = LinkedList::<i32>::new_with_cap(2);
+        // [0]
+        let index_0 = list.push_back(0).unwrap();
+        let index_0_another = list.reposition_to_head(&index_0).unwrap();
+        assert_ne!(Some(index_0), Some(index_0_another));
+        assert_eq!(Some(index_0_another), list.head);
+        assert_eq!(Some(index_0_another), list.tail);
+
+        // [0, 1]
+        let index_1 = list.push_back(1).unwrap();
+        // [1, 0]
+        let index_1_another = list.reposition_to_head(&index_1).unwrap();
+
+        assert_eq!(list.head, Some(index_1_another));
+        assert_eq!(list.tail, Some(index_0_another));
+
+        list.reserve(1);
+        // [1, 0, 2]
+        list.push_back(2).unwrap();
+        // [0, 1, 2]
+        list.reposition_to_head(&index_0_another).unwrap();
+
+        assert!(list.iter().eq([0, 1, 2].iter()));
+    }
+
+    #[test]
+    fn list_pop_front() {
+        let capacity = 10;
+        let mut list = LinkedList::<i32>::new_with_cap(capacity);
+
+        assert_eq!(list.pop_front(), Err(ListError::ListEmpty));
+
+        for ele in 0..capacity {
+            assert!(list.push_back(ele as i32).is_ok());
+        }
+
+        for ele in 0..capacity {
+            assert_eq!(list.pop_front().unwrap(), ele as i32);
+        }
+
+        assert!(list.is_empty());
+        assert_eq!(list.pop_front(), Err(ListError::ListEmpty));
+    }
+
+    #[test]
     fn list_pop_back() {
         let capacity = 10;
         let mut list = LinkedList::<i32>::new_with_cap(capacity);
@@ -324,5 +438,41 @@ mod tests {
         assert_eq!(list.len(), 0);
 
         assert!(list.retire().unwrap().is_none());
+    } 
+
+
+    impl<T> Node<T> {
+        pub fn value(&self) -> &T {
+            &self.value
+        }
+    }
+    #[test]
+    fn list_retire_and_reposition_to_head() {
+        let capacity = 5;
+        let mut list =
+            LinkedList::<i32>::new_with_cap_timeout(capacity, time::Duration::from_millis(1000));
+
+        let mut live_index = list.head;
+        for ele in 0..capacity {
+            let index = list.push_front(ele as i32).unwrap();
+            // 记录中间节点
+            if ele == capacity / 2 {
+                live_index = Some(index);
+            }
+        }
+        assert_eq!(list.len(), capacity);
+
+        // 此时应该节点全都过期了
+        thread::sleep(time::Duration::from_millis(1000));
+
+        // 更新中心节点
+        let live_index = list.reposition_to_head(&live_index.unwrap()).unwrap();
+        assert_eq!(*list.get(&live_index).unwrap().value(), capacity as i32 / 2);
+        assert_eq!(list.head.unwrap(), live_index);
+
+        // 淘汰其余 capacity - 1 个节点
+        assert!(list.retire().is_ok());
+        assert_eq!(list.len(), 1);
+        assert!(list.iter().eq([capacity as i32 / 2].iter()));
     }
 }
