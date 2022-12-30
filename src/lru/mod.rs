@@ -1,4 +1,4 @@
 mod arena;
 mod list;
-
-pub mod err;
+mod cache;
+mod err;

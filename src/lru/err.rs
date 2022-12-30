@@ -1,6 +1,6 @@
 use std::fmt::{Display, Formatter, Result};
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct ArenaOOM;
 
 impl Display for ArenaOOM {
@@ -9,7 +9,7 @@ impl Display for ArenaOOM {
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum ListError {
     LinkBroken,
     ListOOM(ArenaOOM),
@@ -25,6 +25,24 @@ impl Display for ListError {
                 arena_oom.fmt(f)
             }
             ListError::ListEmpty => write!(f, "List is empty."),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CacheError {
+    CacheBroken(ListError),
+    CacheMiss,
+}
+
+impl Display for CacheError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self {
+            CacheError::CacheBroken(list_error) => {
+                write!(f, "Cache storage is broken: ")?;
+                list_error.fmt(f)
+            }
+            CacheError::CacheMiss => write!(f, "Key not found in cache."),
         }
     }
 }

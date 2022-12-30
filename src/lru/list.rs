@@ -6,7 +6,7 @@ use super::{
 use std::time;
 
 pub struct Node<T> {
-    value: T,
+    pub value: T,
     // 淘汰时间
     // 为空说明没有开启自动超时淘汰机制
     expire_time: Option<time::Instant>,
