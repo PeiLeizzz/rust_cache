@@ -5,7 +5,7 @@ use crate::lru::list::LinkedList;
 use crate::lru::arena::Index;
 use crate::lru::err::CacheError;
 
-pub struct ListItem<K, V> {
+struct ListItem<K, V> {
     pub key: K,
     pub value: V,
 }
@@ -84,6 +84,10 @@ where
         self.map.insert(key, index);
 
         Ok(())
+    }
+
+    pub fn len(&self) -> usize {
+        self.list.len()
     }
 
     fn retire(&mut self) -> Result<(), CacheError> {
